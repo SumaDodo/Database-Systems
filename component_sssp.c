@@ -9,55 +9,15 @@
 #include "config.h"
 #include "tuple.h"
 #include <fcntl.h>
+#define IN 99
+#define N 6
 
-#define MAX_SIZE 100
-
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <limits.h>
- 
-/*typedef struct {
-    int vertex;
-    int weight;
-} dedge_t;
- 
-typedef struct {
-    edge_t **edges;
-    int edges_len;
-    int edges_size;
-    int dist;
-    int prev;
-    int visited;
-} dvertex_t;
- 
-typedef struct {
-    vertex_t **vertices;
-    int vertices_len;
-    int vertices_size;
-} dgraph_t;
- 
-typedef struct {
-    int *data;
-    int *prio;
-    int *index;
-    int len;
-    int size;
-} dheap_t;*/
-
-dgraph_t *g;
-
-int
-component_sssp(
-        char *grdbdir,
-        int gidx,
-        int cidx,
-        vertexid_t id1,
-        vertexid_t id2,
-        char *weight_field)
+int dijkstra(int cost[][N], int source, int target);
+void
+component_neighbors(char *grdbdir, int gidx, int cidx, vertexid_t id)
 {
 	
-	
+
 	struct component c;
 	int fd;
 	char s[BUFSIZE];
@@ -80,6 +40,7 @@ component_sssp(
 	/* Load vertex schema */
 	memset(s, 0, BUFSIZE);
 	sprintf(s, "%s/%d/%d/sv", grdbdir, gidx, cidx);
+	printf("Vertex Schema - %s/%d/%d/sv\n", grdbdir, gidx, cidx);
 	fd = open(s, O_RDONLY);
 	if (fd >= 0) {
 		c.sv = schema_read(fd, c.el);
@@ -94,11 +55,13 @@ component_sssp(
 		close(fd);
 	}
 	
+	printf("Reading edge scheme, vertex schemas \n");
+
 	sprintf(gname,"%d",gidx);
 	sprintf(cname,"%d",cidx);
 
-	//printf("Gname - %s\n",gname);
-	//printf("Cname - %s\n",cname);
+	printf("Gname - %s\n",gname);
+	printf("Cname - %s\n",cname);
 
 	/* Open vertex file */
 	memset(s, 0, BUFSIZE);
@@ -112,22 +75,23 @@ component_sssp(
 
 	with_tuples = 0;
 //	component_print(out, &c, with_tuples);
-	sssp_read_edges_schema(&c, with_tuples);
-
-	/*Dijikstra function call */
-	dijkstra(g, id1, id2);
-	print_path(g, id2); 
-       
+	read_vertices_schema(&c, with_tuples);
 
 	close(c.efd);
 	close(c.vfd);
-	/* Change this as needed */
-	return (-1);
+	return;
 }
 
-
-void sssp_read_edges_schema(component_t c, int with_tuples){
-
+int
+component_sssp(
+        char *grdbdir,
+        int gidx,
+        int cidx,
+        vertexid_t id1,
+        vertexid_t id2,
+        char *weight_field,
+		component_t c, int with_tuples)
+{
 	off_t off;
 	ssize_t len, size;
 	vertexid_t id, id1, id2;
@@ -138,66 +102,141 @@ void sssp_read_edges_schema(component_t c, int with_tuples){
 	int vertex_array[MAX_SIZE];
 	int array_size = 0;
 
+	printf("({");
 
-	/*Initialize graph for heap*/
-	g = calloc(1, sizeof (graph_t));
-
-	/* Edges */
-	int i;
-	if (c->se == NULL)
+	/* Vertices */
+	if (c->sv == NULL)
 		size = 0;
 	else
-		size = schema_size(c->se);
+		size = schema_size(c->sv);
 
-	readlen = (sizeof(vertexid_t) << 1) + size;
-#if 0
-	free(buf);
-#endif
+	readlen = sizeof(vertexid_t) + size;
 	buf = malloc(readlen);
 	assert (buf != NULL);
 	memset(buf, 0, readlen);
+
 	for (off = 0;; off += readlen) {
-		lseek(c->efd, off, SEEK_SET);
-		len = read(c->efd, buf, readlen);
+		lseek(c->vfd, off, SEEK_SET);
+		len = read(c->vfd, buf, readlen);
 		if (len <= 0)
 			break;
 
-		id1 = *((vertexid_t *) buf);
-		id2 = *((vertexid_t *) (buf + sizeof(vertexid_t)));
-				
+		id = *((vertexid_t *) buf);
+		vertex_array[array_size] = id;
+		array_size +=1;
+		//printf("%llu", id);			
+	}
+
+	printf("Vertex Array : ");
+	for (int i=0; i < array_size ; i++){
+		//printf("Vertex : %d\t",vertex_array[i]);
+		printf("Neighbors of vertex %d :\t",vertex_array[i]);
+		/* Edges */
+		if (c->se == NULL)
+			size = 0;
+		else
+			size = schema_size(c->se);
+	
+		readlen = (sizeof(vertexid_t) << 1) + size;
+		#if 0
+			free(buf);
+		#endif
+		buf = malloc(readlen);
+		assert (buf != NULL);
+		memset(buf, 0, readlen);
+
+		for (off = 0;; off += readlen) {
+			lseek(c->efd, off, SEEK_SET);
+			len = read(c->efd, buf, readlen);
+			if (len <= 0)
+				break;
 		
-		if (c->se != NULL && with_tuples) {
+			id1 = *((vertexid_t *) buf);
+			id2 = *((vertexid_t *) (buf + sizeof(vertexid_t)));
+			/*if (vertex_array[i] == id1){
+				printf("%llu \t",id2);
+			}*/
+			if (c->se != NULL && with_tuples) {
 			memset(&tuple, 0, sizeof(struct tuple));
 			tuple.s = c->se;
 			tuple.len = size;
 			tuple.buf = buf + (sizeof(vertexid_t) << 1);
 			i = tuple_get_int(tuple.buf);
-			add_edge(g, id1 , id2 , i);
-			printf("i - %d\t",i);			
+			//add_edge(g, id1 , id2 , i);
+			//printf("i - %d\t",i);			
 			//tuple_print(out, &tuple, c->el);
-		}
-	}
+		
+			//printf("(%llu,%llu)", id1, id2);
+			 int cost[N][N],i,j,w,ch,co;
+    int source, target,x,y;
+    printf("\t The Shortest Path Algorithm ( DIJKSTRA'S ALGORITHM in C \n\n");
+    for(i=1;i< N;i++)
+    for(j=1;j< N;j++)
+    cost[i][j] = IN;
+    for(id1=1;x< N;x++)
+    {
+        for(id2=x+1;y< N;y++)
+        {
+            //printf("Enter the weight of the path between nodes %d and %d: ",x,y);
+            //scanf("%d",i);
+            cost [id1][id2] = cost[id2][id1] = i;
+        }
+        printf("\n");
+    }
+	source = id1;
+	target = id2;
 
-#if 0
-	free(buf);
-#endif
+    co = dijsktra(cost,source,target);
+    printf("\nThe Shortest Path: %d",co);
+		}
+		}
+		printf("\n");
+
+	}
 }
 
-/*int main()
+int dijsktra(int cost[][N],int source,int target)
 {
-    int G[MAX][MAX],i,j,n,u;
-    printf("Enter no. of vertices:");
-    scanf("%d",&n);
-    printf("\nEnter the adjacency matrix:\n");
-    
-    for(i=0;i<n;i++)
-        for(j=0;j<n;j++)
-            scanf("%d",&G[i][j]);
-    
-    printf("\nEnter the starting node:");
-    scanf("%d",&u);
-    dijkstra(G,n,u);
-    
-    return 0;
-}*/
- 
+    int dist[N],prev[N],selected[N]={0},i,m,min,start,d,j;
+    char path[N];
+    for(i=1;i< N;i++)
+    {
+        dist[i] = IN;
+        prev[i] = -1;
+    }
+    start = source;
+    selected[start]=1;
+    dist[start] = 0;
+    while(selected[target] ==0)
+    {
+        min = IN;
+        m = 0;
+        for(i=1;i< N;i++)
+        {
+            d = dist[start] +cost[start][i];
+            if(d< dist[i]&&selected[i]==0)
+            {
+                dist[i] = d;
+                prev[i] = start;
+            }
+            if(min>dist[i] && selected[i]==0)
+            {
+                min = dist[i];
+                m = i;
+            }
+        }
+        start = m;
+        selected[start] = 1;
+    }
+    start = target;
+    j = 0;
+    while(start != -1)
+    {
+        path[j++] = start+65;
+        start = prev[start];
+    }
+    path[j]='\0';
+    strrev(path);
+    printf("%s", path);
+    return dist[target];
+}
